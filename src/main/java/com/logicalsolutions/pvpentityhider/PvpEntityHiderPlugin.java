@@ -19,8 +19,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 @PluginDescriptor(
 	name = "PvP Auto Entity Hider",
 	description = "Hide all players except your attacker while under attack in dangerous PvP areas",
-	tags = {"pvp", "entity", "hider", "wilderness"},
-	enabledByDefault = false
+	tags = {"pvp", "entity", "hider", "wilderness"}
 )
 public class PvpEntityHiderPlugin extends Plugin
 {
