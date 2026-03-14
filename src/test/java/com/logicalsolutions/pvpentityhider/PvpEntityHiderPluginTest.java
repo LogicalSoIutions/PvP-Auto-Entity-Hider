@@ -3,7 +3,7 @@ package com.logicalsolutions.pvpentityhider;
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class PvpEntityHiderLauncher
+public class PvpEntityHiderPluginTest
 {
 	public static void main(String[] args) throws Exception
 	{

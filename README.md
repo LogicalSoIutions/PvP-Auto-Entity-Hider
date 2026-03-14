@@ -44,8 +44,7 @@ Current plugin settings:
 ### Option A: Local external plugin development
 
 1. Clone this repository
-2. Build or run via Gradle
-3. Launch RuneLite in developer mode from this project
+2. Run RuneLite in developer mode via Gradle
 
 ```bash
 gradlew.bat run
@@ -67,6 +66,9 @@ gradlew.bat compileJava
 # Run RuneLite with this plugin loaded
 gradlew.bat run
 
+# Build
+gradlew.bat build
+
 # Build fat jar
 gradlew.bat shadowJar
 ```
@@ -77,5 +79,6 @@ gradlew.bat shadowJar
 src/main/java/com/logicalsolutions/pvpentityhider/
   PvpEntityHiderPlugin.java
   PvpEntityHiderConfig.java
-  PvpEntityHiderLauncher.java
+src/test/java/com/logicalsolutions/pvpentityhider/
+  PvpEntityHiderPluginTest.java
 ```
