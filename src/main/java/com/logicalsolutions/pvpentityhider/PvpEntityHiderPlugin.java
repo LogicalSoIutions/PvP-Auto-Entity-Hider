@@ -10,8 +10,10 @@ import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.Renderable;
 import net.runelite.api.Varbits;
+import net.runelite.api.events.GameTick;
 import net.runelite.client.callback.Hooks;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 
@@ -23,7 +25,8 @@ import net.runelite.client.plugins.PluginDescriptor;
 )
 public class PvpEntityHiderPlugin extends Plugin
 {
-	private static final long MILLIS_PER_SECOND = 1000L;
+	private static final int MILLIS_PER_SECOND = 1000;
+	private static final int MILLIS_PER_TICK = 600;
 
 	@Inject
 	private Client client;
@@ -35,8 +38,10 @@ public class PvpEntityHiderPlugin extends Plugin
 	private Hooks hooks;
 
 	private final Hooks.RenderableDrawListener drawListener = this::shouldDraw;
-	private long lastAttackedAtMillis;
-	private final Map<String, Long> attackerLastSeenMillis = new HashMap<>();
+	private int lastAttackedAtTick;
+	private boolean dangerousPvpArea;
+	private boolean underAttackOrGracePeriod;
+	private final Map<String, Integer> attackerLastSeenTick = new HashMap<>();
 
 	@Override
 	protected void startUp()
@@ -60,6 +65,40 @@ public class PvpEntityHiderPlugin extends Plugin
 		return configManager.getConfig(PvpEntityHiderConfig.class);
 	}
 
+	@Subscribe
+	public void onGameTick(GameTick gameTick)
+	{
+		Player localPlayer = client.getLocalPlayer();
+		if (!config.enabled() || localPlayer == null)
+		{
+			resetAttackState();
+			return;
+		}
+
+		dangerousPvpArea = isInDangerousPvpArea();
+		if (!dangerousPvpArea)
+		{
+			resetAttackState();
+			return;
+		}
+
+		int tick = client.getTickCount();
+		boolean hasActiveAttacker = updateAttackers(localPlayer, tick);
+		if (hasActiveAttacker)
+		{
+			lastAttackedAtTick = tick;
+		}
+
+		int gracePeriodTicks = getGracePeriodTicks();
+		underAttackOrGracePeriod = hasActiveAttacker
+			|| (lastAttackedAtTick >= 0 && tick - lastAttackedAtTick <= gracePeriodTicks);
+
+		if (!underAttackOrGracePeriod)
+		{
+			resetAttackState();
+		}
+	}
+
 	private boolean shouldDraw(Renderable renderable, boolean drawingUI)
 	{
 		if (!(renderable instanceof Player))
@@ -69,14 +108,12 @@ public class PvpEntityHiderPlugin extends Plugin
 
 		if (!config.enabled())
 		{
-			resetAttackState();
 			return true;
 		}
 
 		Player localPlayer = client.getLocalPlayer();
 		if (localPlayer == null)
 		{
-			resetAttackState();
 			return true;
 		}
 
@@ -86,18 +123,13 @@ public class PvpEntityHiderPlugin extends Plugin
 			return true;
 		}
 
-		if (!isInDangerousPvpArea())
+		if (!dangerousPvpArea || !underAttackOrGracePeriod)
 		{
-			resetAttackState();
 			return true;
 		}
 
-		if (!isUnderAttackOrGracePeriod(localPlayer))
-		{
-			return true;
-		}
-		long now = System.currentTimeMillis();
-		return isActivelyAttackingLocalPlayer(player, localPlayer) || isRecentAttacker(player, now);
+		int tick = client.getTickCount();
+		return isActivelyAttackingLocalPlayer(player, localPlayer) || isRecentAttacker(player, tick);
 	}
 
 	private boolean isInDangerousPvpArea()
@@ -107,7 +139,7 @@ public class PvpEntityHiderPlugin extends Plugin
 		return inWilderness || hasPvpSpecOrb;
 	}
 
-	private boolean updateAttackers(Player localPlayer, long now)
+	private boolean updateAttackers(Player localPlayer, int tick)
 	{
 		boolean hasActiveAttacker = false;
 		for (Player player : client.getPlayers())
@@ -122,40 +154,23 @@ public class PvpEntityHiderPlugin extends Plugin
 				String attackerName = player.getName();
 				if (attackerName != null)
 				{
-					attackerLastSeenMillis.put(attackerName, now);
+					attackerLastSeenTick.put(attackerName, tick);
 				}
 				hasActiveAttacker = true;
 			}
 		}
 
-		pruneExpiredAttackers(now);
+		pruneExpiredAttackers(tick);
 		return hasActiveAttacker;
 	}
 
-	private boolean isUnderAttackOrGracePeriod(Player localPlayer)
+	private int getGracePeriodTicks()
 	{
-		long now = System.currentTimeMillis();
-		if (updateAttackers(localPlayer, now))
-		{
-			lastAttackedAtMillis = now;
-			return true;
-		}
-
-		if (lastAttackedAtMillis == 0L)
-		{
-			return false;
-		}
-
-		long gracePeriodMillis = config.gracePeriodSeconds() * MILLIS_PER_SECOND;
-		boolean inGracePeriod = now - lastAttackedAtMillis <= gracePeriodMillis;
-		if (!inGracePeriod)
-		{
-			resetAttackState();
-		}
-		return inGracePeriod;
+		// Round up so the configured seconds are never shorter than requested.
+		return (config.gracePeriodSeconds() * MILLIS_PER_SECOND + (MILLIS_PER_TICK - 1)) / MILLIS_PER_TICK;
 	}
 
-	private boolean isRecentAttacker(Player player, long now)
+	private boolean isRecentAttacker(Player player, int tick)
 	{
 		String name = player.getName();
 		if (name == null)
@@ -163,24 +178,23 @@ public class PvpEntityHiderPlugin extends Plugin
 			return false;
 		}
 
-		Long lastSeenAt = attackerLastSeenMillis.get(name);
+		Integer lastSeenAt = attackerLastSeenTick.get(name);
 		if (lastSeenAt == null)
 		{
 			return false;
 		}
 
-		long gracePeriodMillis = config.gracePeriodSeconds() * MILLIS_PER_SECOND;
-		return now - lastSeenAt <= gracePeriodMillis;
+		return tick - lastSeenAt <= getGracePeriodTicks();
 	}
 
-	private void pruneExpiredAttackers(long now)
+	private void pruneExpiredAttackers(int tick)
 	{
-		long gracePeriodMillis = config.gracePeriodSeconds() * MILLIS_PER_SECOND;
-		Iterator<Map.Entry<String, Long>> iterator = attackerLastSeenMillis.entrySet().iterator();
+		int gracePeriodTicks = getGracePeriodTicks();
+		Iterator<Map.Entry<String, Integer>> iterator = attackerLastSeenTick.entrySet().iterator();
 		while (iterator.hasNext())
 		{
-			Map.Entry<String, Long> entry = iterator.next();
-			if (now - entry.getValue() > gracePeriodMillis)
+			Map.Entry<String, Integer> entry = iterator.next();
+			if (tick - entry.getValue() > gracePeriodTicks)
 			{
 				iterator.remove();
 			}
@@ -194,7 +208,9 @@ public class PvpEntityHiderPlugin extends Plugin
 
 	private void resetAttackState()
 	{
-		lastAttackedAtMillis = 0L;
-		attackerLastSeenMillis.clear();
+		lastAttackedAtTick = -1;
+		dangerousPvpArea = false;
+		underAttackOrGracePeriod = false;
+		attackerLastSeenTick.clear();
 	}
 }

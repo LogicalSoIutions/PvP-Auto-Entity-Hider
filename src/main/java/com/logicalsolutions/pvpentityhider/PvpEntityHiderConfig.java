@@ -19,13 +19,13 @@ public interface PvpEntityHiderConfig extends Config
 	}
 
 	@Range(
-		min = 5,
-		max = 8
+		min = 1,
+		max = 15
 	)
 	@ConfigItem(
 		keyName = "gracePeriodSeconds",
 		name = "Grace Period (seconds)",
-		description = "How long to keep attacker-only hiding active after attacks pause"
+		description = "How long to keep attacker-only hiding active after attacks pause (applied on game ticks, rounded up)"
 	)
 	default int gracePeriodSeconds()
 	{
